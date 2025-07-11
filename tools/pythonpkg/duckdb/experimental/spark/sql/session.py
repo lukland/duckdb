@@ -203,7 +203,9 @@ class SparkSession:
             end = start
             start = 0
 
-        return DataFrame(self.conn.table_function("range", parameters=[start, end, step]),self)
+        return DataFrame(
+            self.conn.table_function("range", parameters=[start, end, step]), self
+        ).withColumnRenamed("range", "id")
 
     def sql(self, sqlQuery: str, **kwargs: Any) -> DataFrame:
         if kwargs:

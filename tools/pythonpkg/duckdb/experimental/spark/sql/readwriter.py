@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, Union, cast
 
 from ..exception import ContributionsAcceptedError
 from .types import StructType
@@ -12,6 +12,36 @@ OptionalPrimitiveType = Optional[PrimitiveType]
 if TYPE_CHECKING:
     from duckdb.experimental.spark.sql.dataframe import DataFrame
     from duckdb.experimental.spark.sql.session import SparkSession
+
+
+class OptionUtils:
+    def __init__(self) -> None:
+        self._options: Dict[str, PrimitiveType] = {}
+
+    def option(self, key: str, value: PrimitiveType) -> "OptionUtils":
+        self._options[key] = value
+        return self
+
+    def options(self, **options: PrimitiveType) -> "OptionUtils":
+        self._options.update(options)
+        return self
+    
+    def _set_opts(
+        self,
+        schema: Optional[Union[StructType, str]] = None,
+        unsupported_options: Optional[List[str]] = None,
+        **options: "OptionalPrimitiveType",
+    ) -> None:
+        """
+        Set named options (filter out those the value is None)
+        """
+        if schema is not None:
+            self.schema(schema)  # type: ignore[attr-defined]
+        for k, v in options.items():
+            if v is not None:
+                if unsupported_options is not None and k in unsupported_options:
+                    raise ContributionsAcceptedError(f"Option '{k}' is not yet supported.")
+                self.option(k, v)  # type: ignore[attr-defined]
 
 
 class DataFrameWriter:
@@ -88,8 +118,35 @@ class DataFrameWriter:
         )
 
 
-class DataFrameReader:
+class DataFrameReader(OptionUtils):
+    _CSV_UNSUPPORTED_OPTIONS = [
+            "comment",
+            "inferSchema",
+            "ignoreLeadingWhiteSpace",
+            "ignoreTrailingWhiteSpace",
+            "nanValue",
+            "positiveInf",
+            "negativeInf",
+            "maxColumns",
+            "maxCharsPerColumn",
+            "maxMalformedLogPerPartition",
+            "mode",
+            "columnNameOfCorruptRecord",
+            "multiLine",
+            "charToEscapeQuoteEscaping",
+            "samplingRatio",
+            "enforceSchema",
+            "emptyValue",
+            "locale",
+            "pathGlobFilter",
+            "recursiveFileLookup",
+            "modifiedBefore",
+            "modifiedAfter",
+            "unescapedQuoteHandling",
+    ]
+
     def __init__(self, session: "SparkSession"):
+        super().__init__()
         self.session = session
 
     def load(
@@ -102,7 +159,8 @@ class DataFrameReader:
         from duckdb.experimental.spark.sql.dataframe import DataFrame
 
         if not isinstance(path, str):
-            raise ImportError
+            raise NotImplementedError
+        
         if options:
             raise ContributionsAcceptedError
 
@@ -168,59 +226,50 @@ class DataFrameReader:
     ) -> "DataFrame":
         if not isinstance(path, str):
             raise NotImplementedError
+        
         if schema and not isinstance(schema, StructType):
             raise ContributionsAcceptedError
-        if comment:
-            raise ContributionsAcceptedError
-        if inferSchema:
-            raise ContributionsAcceptedError
-        if ignoreLeadingWhiteSpace:
-            raise ContributionsAcceptedError
-        if ignoreTrailingWhiteSpace:
-            raise ContributionsAcceptedError
-        if nanValue:
-            raise ConnectionAbortedError
-        if positiveInf:
-            raise ConnectionAbortedError
-        if negativeInf:
-            raise ConnectionAbortedError
-        if negativeInf:
-            raise ConnectionAbortedError
-        if maxColumns:
-            raise ContributionsAcceptedError
-        if maxCharsPerColumn:
-            raise ContributionsAcceptedError
-        if maxMalformedLogPerPartition:
-            raise ContributionsAcceptedError
-        if mode:
-            raise ContributionsAcceptedError
-        if columnNameOfCorruptRecord:
-            raise ContributionsAcceptedError
-        if multiLine:
-            raise ContributionsAcceptedError
-        if charToEscapeQuoteEscaping:
-            raise ContributionsAcceptedError
-        if samplingRatio:
-            raise ContributionsAcceptedError
-        if enforceSchema:
-            raise ContributionsAcceptedError
-        if emptyValue:
-            raise ContributionsAcceptedError
-        if locale:
-            raise ContributionsAcceptedError
-        if pathGlobFilter:
-            raise ContributionsAcceptedError
-        if recursiveFileLookup:
-            raise ContributionsAcceptedError
-        if modifiedBefore:
-            raise ContributionsAcceptedError
-        if modifiedAfter:
-            raise ContributionsAcceptedError
-        if unescapedQuoteHandling:
-            raise ContributionsAcceptedError
+        
         if lineSep:
             # We have support for custom newline, just needs to be ported to 'read_csv'
             raise NotImplementedError
+        
+        self._set_opts(
+            schema=schema,
+            unsupported_options=self._CSV_UNSUPPORTED_OPTIONS,
+            sep=sep,
+            encoding=encoding,
+            quote=quote,
+            escape=escape,
+            comment=comment,
+            header=header,
+            inferSchema=inferSchema,
+            ignoreLeadingWhiteSpace=ignoreLeadingWhiteSpace,
+            ignoreTrailingWhiteSpace=ignoreTrailingWhiteSpace,
+            nullValue=nullValue,
+            nanValue=nanValue,
+            positiveInf=positiveInf,
+            negativeInf=negativeInf,
+            dateFormat=dateFormat,
+            timestampFormat=timestampFormat,
+            maxColumns=maxColumns,
+            maxCharsPerColumn=maxCharsPerColumn,
+            maxMalformedLogPerPartition=maxMalformedLogPerPartition,
+            mode=mode,
+            columnNameOfCorruptRecord=columnNameOfCorruptRecord,
+            multiLine=multiLine,
+            charToEscapeQuoteEscaping=charToEscapeQuoteEscaping,
+            samplingRatio=samplingRatio,
+            enforceSchema=enforceSchema,
+            emptyValue=emptyValue,
+            locale=locale,
+            lineSep=lineSep,
+            pathGlobFilter=pathGlobFilter,
+            recursiveFileLookup=recursiveFileLookup,
+            modifiedBefore=modifiedBefore,
+            modifiedAfter=modifiedAfter,
+            unescapedQuoteHandling=unescapedQuoteHandling,
+        )
 
         dtype = None
         names = None
@@ -228,17 +277,18 @@ class DataFrameReader:
             schema = cast(StructType, schema)
             dtype, names = schema.extract_types_and_names()
 
+        header = self._options.get("header")
         rel = self.session.conn.read_csv(
             path,
             header=header if isinstance(header, bool) else header == "True",
-            sep=sep,
+            sep=self._options.get("sep"),
             dtype=dtype,
-            na_values=nullValue,
-            quotechar=quote,
-            escapechar=escape,
-            encoding=encoding,
-            date_format=dateFormat,
-            timestamp_format=timestampFormat,
+            na_values=self._options.get("nullValue"),
+            quotechar=self._options.get("quote"),
+            escapechar=self._options.get("escape"),
+            encoding=self._options.get("encoding"),
+            date_format=self._options.get("dateFormat"),
+            timestamp_format=self._options.get("timestampFormat"),
         )
         from ..sql.dataframe import DataFrame
 
